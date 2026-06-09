@@ -1,0 +1,26 @@
+# Xcode
+DerivedData/
+.build/
+
+# User-specific data
+xcuserdata/
+*.xcuserdatad
+*.xcuserstate
+
+# macOS
+.DS_Store
+
+# Swift Package Manager
+.swiftpm/
+
+# Fastlane (optional)
+fastlane/report.xml
+fastlane/Preview.html
+fastlane/screenshots/
+
+# Archives
+*.xcarchive
+
+# Playgrounds
+timeline.xctimeline
+playground.xcworkspace
