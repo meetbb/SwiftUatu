@@ -12,23 +12,19 @@ import SwiftUI
     It is the only place in the framework that touches SwiftUI directly.
 
     What it does
-    It wraps a view and hooks into three points in SwiftUI's rendering lifecycle:
-      - body evaluation  → emits .viewRendered   (fires every time SwiftUI re-evaluates the view's body)
-      - onAppear         → emits .viewAppeared    (fires when the view enters the view hierarchy)
-      - onDisappear      → emits .viewDisappeared (fires when the view leaves the view hierarchy)
+    It hooks into two lifecycle points:
+      - onAppear    → emits .viewAppeared    (fires when the view enters the view hierarchy)
+      - onDisappear → emits .viewDisappeared (fires when the view leaves the view hierarchy)
 
-    Why body evaluation for render count?
-    SwiftUI re-evaluates a view's body every time it needs to reconcile the view tree.
-    Counting body evaluations is the closest proxy we have for "how often did SwiftUI
-    re-render this view?" — which is the core signal for detecting unnecessary re-renders.
-    We capture this by reading a @State counter that increments inside `body`, forcing
-    SwiftUI to evaluate `body` as a side effect. Using a background modifier keeps the
-    visual impact zero.
+    Why not render counting here?
+    A ViewModifier's body(content:) is only re-called when the modifier's own inputs change,
+    not when the wrapped view's internal state changes. SwiftUI skips re-evaluating modifiers
+    with stable inputs as an optimization. Render counting must therefore happen inline,
+    inside the view's own body, via uatu.trackRender("ViewName").
 
     EventBus access:
-    The modifier receives the EventBus as a plain (non-isolated) reference. Publishing
-    an event is an `async` call, so we dispatch it with `Task { }` — fire and forget.
-    We never await the result from inside a synchronous SwiftUI context.
+    Publishing an event is `async`, so we dispatch it with `Task { }` — fire and forget.
+    We never await inside a synchronous SwiftUI context.
 
     Usage:
     Consumers never use this modifier directly. They call `.trackWithUatu(...)` on any View,
@@ -39,27 +35,8 @@ struct UatuViewModifier: ViewModifier {
     let viewName: String
     let eventBus: EventBus
 
-    // Each increment triggers a body re-evaluation, which we treat as one render event.
-    @State private var renderCount: Int = 0
-
     func body(content: Content) -> some View {
-        // Reading renderCount inside body means SwiftUI tracks it as a dependency.
-        // Any external increment of renderCount will cause body to re-evaluate,
-        // but here we use it the other way: body itself records that it was called.
-        let _ = renderCount
-
-        return content
-            .background(
-                // A zero-size background view whose only job is to emit the render event.
-                // Putting side effects in a background modifier is a common SwiftUI pattern
-                // for keeping the main view's body clean.
-                Color.clear
-                    .onAppear {
-                        // onAppear on the background fires in sync with the parent's first layout.
-                        // We use it to emit the render signal for this body evaluation pass.
-                        emitEvent(.viewRendered(viewName: viewName))
-                    }
-            )
+        content
             .onAppear {
                 emitEvent(.viewAppeared(viewName: viewName))
             }
