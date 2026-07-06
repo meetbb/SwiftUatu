@@ -6,6 +6,14 @@ Inspired by Uatu the Watcher: it observes everything, changes nothing.
 
 ---
 
+## Demo
+
+![SwiftUatu v0.2.0 — FPS and render count overlay on a live app](Screenshots/v0.2.0-demo.png)
+
+The overlay shows live FPS (green = healthy, orange = degraded, red = critical) alongside per-view render counts. `CounterView` at 108× re-renders reflects its 1-second timer; `StaticView` holds at 1× as expected.
+
+---
+
 ## Status
 
 | Milestone | Status |
