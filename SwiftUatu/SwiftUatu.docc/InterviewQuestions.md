@@ -208,3 +208,77 @@ while !Task.isCancelled {
 When SwiftUI cancels the task, `Task.isCancelled` becomes `true` on the next check and the loop exits cleanly. `try? await Task.sleep` also throws a `CancellationError` when cancelled, which we suppress with `try?` — this causes the sleep to exit early and the loop to check the cancellation flag immediately.
 
 The result: no dangling background task, no memory leak, no polling after the view is gone.
+
+---
+
+## v0.2.0 — FPS Monitoring
+
+---
+
+**Q16. What is `CADisplayLink` and why do we use it to measure FPS?**
+
+`CADisplayLink` is a timer provided by Apple that fires in sync with the display's refresh cycle. Unlike a regular `Timer` which fires after a fixed time interval, `CADisplayLink` fires exactly once per frame — so on a 60Hz display it fires 60 times per second, and on a ProMotion 120Hz display it fires 120 times per second.
+
+This makes it the most accurate tool available for FPS measurement. A regular `Timer` might fire a little early or late depending on the run loop load. `CADisplayLink` is purpose-built for frame-by-frame timing and is how Apple's own Instruments measures FPS.
+
+We use it in `FPSCollector` by counting how many times it fires within a 1-second window and dividing: `fps = frameCount / elapsed`.
+
+---
+
+**Q17. Why does `FPSCollector` bypass EventBus and write directly to MetricsStore?**
+
+FPS is a *continuous sampled metric* — it's not triggered by a user action or a view lifecycle event. `CADisplayLink` fires 60 times per second, every second, for the entire lifetime of the app.
+
+If we routed each tick through EventBus, we'd be publishing 60 events per second, fanning them out to every subscriber, and processing them through the collector chain — all for a metric we only need to update once per second anyway. That's unnecessary overhead and noise.
+
+The right mental model: EventBus is for *discrete, meaningful signals* (view rendered, view appeared). MetricsStore is for *current state*. FPS is state — "what is the frame rate right now?" — so writing directly to MetricsStore is the correct choice.
+
+---
+
+**Q18. Why does `FPSCollector` inherit from `NSObject`?**
+
+`CADisplayLink` is an Objective-C API. To receive its callbacks, you pass it a target and a selector — the target must be an Objective-C object, which in Swift means it must inherit from `NSObject`.
+
+The `#selector(tick(_:))` syntax compiles only on `@objc`-capable methods, and `@objc` methods require the class to be a subclass of `NSObject` (or already Objective-C-compatible). Without `NSObject`, the compiler would reject the `CADisplayLink` setup.
+
+This is a common Swift/Objective-C bridging pattern: when you need to pass a callback selector to an older Apple API, you typically need `NSObject`.
+
+---
+
+**Q19. Why is `FPSCollector` marked `@MainActor`?**
+
+`CADisplayLink` is added to the main run loop (`RunLoop.main`) and calls its target on the main thread. Since `FPSCollector` manages the display link and responds to its callbacks, all its work naturally happens on the main thread.
+
+Marking it `@MainActor` makes this explicit to the Swift compiler. It means:
+- All properties (`frameCount`, `windowStartTime`, `displayLink`) are guaranteed to be accessed only on the main thread — no data races.
+- The Swift concurrency system knows these properties are main-actor-isolated, so it can enforce this at compile time rather than leaving it to runtime chance.
+
+Without `@MainActor`, the properties would be unprotected, and accessing them from any async context could technically cause a data race.
+
+---
+
+**Q20. `FPSCollector` writes to `MetricsStore` using `Task { await metricsStore.updateFPS(fps) }`. Why is this safe?**
+
+Two things need to be true for this to be safe:
+
+1. **No shared mutable state is captured across actors.** The `fps` value passed to `updateFPS` is a `Double` — a value type. Copying it into the Task closure is safe; no reference is shared.
+
+2. **The write is serialized by the actor.** `MetricsStore` is an actor. Even if multiple tasks try to call `updateFPS` at the same time, the actor serializes them — only one executes at a time. There's no possibility of two writes corrupting each other.
+
+The `Task { }` wrapper is needed because `tick(_:)` is a synchronous `@objc` method — it can't use `await` directly. The Task bridges from the synchronous `@MainActor` world into the async actor world of `MetricsStore`.
+
+---
+
+**Q21. Why does `FPSCollector` have a `stop()` method, and what happens if you don't call it?**
+
+`CADisplayLink` retains its target (`FPSCollector`) strongly. If you never invalidate the display link, it keeps firing and keeps holding a strong reference to the collector — even if nothing else in the app references the collector anymore. This is a memory leak and an unnecessary battery drain.
+
+Calling `stop()` does two things:
+```swift
+displayLink?.invalidate()  // Removes it from the run loop and releases the target reference
+displayLink = nil          // Releases our own reference to the CADisplayLink
+```
+
+After `invalidate()`, `CADisplayLink` releases its hold on the target, breaking the retain cycle. In SwiftUatu, `Uatu` owns `FPSCollector`, and when `Uatu` is deallocated, `FPSCollector` is deallocated — but only if the display link has been properly stopped first.
+
+For v0.2, `stop()` is public so callers can clean up explicitly. A future version could tie this to the app's lifecycle automatically.

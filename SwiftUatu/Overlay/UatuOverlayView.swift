@@ -15,22 +15,39 @@ struct UatuOverlayView: View {
 
     let metricsStore: MetricsStore
 
-    // Local snapshot of MetricsStore data, refreshed on a timer.
-    // Using @State here keeps the overlay self-contained — no need to make MetricsStore observable.
+    @State private var fps: Double = 0.0
     @State private var renderCounts: [String: Int] = [:]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
+
+            // Header
             Text("Uatu 👁")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundColor(.yellow)
 
+            Divider().background(Color.gray.opacity(0.5))
+
+            // Runtime metrics section (v0.2.0)
+            HStack(spacing: 6) {
+                Text("FPS")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.white)
+                Spacer()
+                Text(fps == 0 ? "—" : String(format: "%.0f", fps))
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    // Below 50 FPS is a warning sign; below 30 is a serious problem.
+                    .foregroundColor(fpsColor(fps))
+            }
+
+            Divider().background(Color.gray.opacity(0.5))
+
+            // Render counts section (v0.1.0)
             if renderCounts.isEmpty {
                 Text("No views tracked yet")
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.gray)
             } else {
-                // Sort alphabetically for a stable, readable display.
                 ForEach(renderCounts.sorted(by: { $0.key < $1.key }), id: \.key) { name, count in
                     HStack(spacing: 6) {
                         Text(name)
@@ -39,7 +56,6 @@ struct UatuOverlayView: View {
                         Spacer()
                         Text("\(count)×")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                            // Highlight views with high render counts as a quick visual cue.
                             .foregroundColor(count > 10 ? .orange : .green)
                     }
                 }
@@ -50,13 +66,22 @@ struct UatuOverlayView: View {
         .cornerRadius(8)
         .frame(minWidth: 180)
         .padding(12)
-        // Poll MetricsStore every 0.5s. The Task is cancelled automatically when the overlay leaves the hierarchy.
         .task {
             while !Task.isCancelled {
+                fps = await metricsStore.currentFPS()
                 renderCounts = await metricsStore.allRenderCounts()
                 try? await Task.sleep(nanoseconds: 500_000_000) // 0.5s
             }
         }
+    }
+
+    // MARK: - Private
+
+    private func fpsColor(_ fps: Double) -> Color {
+        if fps == 0    { return .gray }
+        if fps >= 50   { return .green }
+        if fps >= 30   { return .orange }
+        return .red
     }
 }
 

@@ -15,23 +15,41 @@
 import Foundation
 
 public actor MetricsStore {
-    
+
+    // MARK: - Render Counts (v0.1.0)
+
     private var renderCounts: [String: Int] = [:]
-    
+
     public init() {}
-    
-    // This func is called by the RenderCollector each time a viewRendered event arrives.
+
+    // Called by RenderCollector each time a .viewRendered event arrives.
     public func incrementRenderCount(for viewName: String) {
         renderCounts[viewName, default: 0] += 1
     }
-    
-    // This function is called by the overlay or analysis engine to read the current count for a specific view.
+
+    // Returns the render count for a single view.
     public func renderCount(for viewName: String) -> Int {
         renderCounts[viewName, default: 0]
     }
-    
-    // This function returns the full snapshot. Useful for the overlay to display all tracked views at once.
+
+    // Returns the full render count snapshot. Used by the overlay.
     public func allRenderCounts() -> [String: Int] {
         renderCounts
+    }
+
+    // MARK: - FPS (v0.2.0)
+
+    // Stores the most recent FPS sample written by FPSCollector.
+    // 0.0 means no sample has been recorded yet.
+    private var _currentFPS: Double = 0.0
+
+    // Called by FPSCollector once per second with the measured frame rate.
+    public func updateFPS(_ fps: Double) {
+        _currentFPS = fps
+    }
+
+    // Read by the overlay to display the current FPS.
+    public func currentFPS() -> Double {
+        _currentFPS
     }
 }

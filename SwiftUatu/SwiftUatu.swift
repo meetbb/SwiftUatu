@@ -32,8 +32,8 @@ public final class Uatu: ObservableObject {
 
     // MARK: - Private
 
-    // RenderCollector is internal — callers never interact with it directly.
     private let renderCollector: RenderCollector
+    private let fpsCollector: FPSCollector
 
     // MARK: - Init
 
@@ -42,16 +42,17 @@ public final class Uatu: ObservableObject {
         self.eventBus = EventBus()
         self.metricsStore = MetricsStore()
         self.renderCollector = RenderCollector(eventBus: eventBus, metricsStore: metricsStore)
+        self.fpsCollector = FPSCollector(metricsStore: metricsStore)
     }
 
     // MARK: - Lifecycle
 
     // Starts all metric collectors. Call once after init, before any views appear.
-    // When config.isEnabled is false, this is a no-op — no collectors are registered,
-    // so published events go nowhere and overhead is effectively zero.
+    // When config.isEnabled is false, this is a no-op.
     public func start() async {
         guard config.isEnabled else { return }
         await renderCollector.start()
+        fpsCollector.start()
     }
 
     // MARK: - Render Tracking
